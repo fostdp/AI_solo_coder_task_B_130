@@ -175,9 +175,12 @@ type DynastyRepairTechnique struct {
 	LaborCost        int       `json:"labor_cost" db:"labor_cost"`
 	DurationDays     int       `json:"duration_days" db:"duration_days"`
 	CostSilverLiang  float64   `json:"cost_silver_liang" db:"cost_silver_liang"`
-	HistoricalNotes  string    `json:"historical_notes" db:"historical_notes"`
-	ReferenceSources string    `json:"reference_sources" db:"reference_sources"`
-	CreatedAt        time.Time `json:"created_at" db:"created_at"`
+	HistoricalNotes     string    `json:"historical_notes" db:"historical_notes"`
+	ReferenceSources    string    `json:"reference_sources" db:"reference_sources"`
+	ArchaeologicalSource string   `json:"source_archaeology,omitempty" db:"-"`
+	UncertaintyRange    string    `json:"uncertainty_range,omitempty" db:"-"`
+	ExperimentalMethod  string    `json:"experimental_method,omitempty" db:"-"`
+	CreatedAt           time.Time `json:"created_at" db:"created_at"`
 }
 
 type ModernRepairComparison struct {
@@ -198,6 +201,9 @@ type ModernRepairComparison struct {
 	LaborModern         int       `json:"labor_modern" db:"labor_modern"`
 	DurationAncientDays int       `json:"duration_ancient_days" db:"duration_ancient_days"`
 	DurationModernDays  int       `json:"duration_modern_days" db:"duration_modern_days"`
+	Unit                string    `json:"unit" db:"unit"`
+	StandardReference   string    `json:"standard_reference" db:"standard_reference"`
+	StandardCode        string    `json:"standard_code" db:"standard_code"`
 	Description         string    `json:"description" db:"description"`
 	CreatedAt           time.Time `json:"created_at" db:"created_at"`
 }

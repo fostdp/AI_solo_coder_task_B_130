@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -817,6 +818,8 @@ func (h *APIHandler) RunEarthquakeSimulation(c *gin.Context) {
 		return
 	}
 
+	var yuzuiDynamic, feishayanDynamic, baopingkouDynamic, renzidiDynamic float64
+
 	if req.FocalMechanism == "" {
 		req.FocalMechanism = "strike-slip"
 	}
@@ -827,6 +830,129 @@ func (h *APIHandler) RunEarthquakeSimulation(c *gin.Context) {
 	feishayanLoc := StructureLocation{X: 150, Y: 30, Z: 728}
 	baopingkouLoc := StructureLocation{X: 200, Y: 60, Z: 725}
 	renzidiLoc := StructureLocation{X: 80, Y: 80, Z: 727}
+
+	// ============= 新增：Newmark-β 动力时程积分 & 并行计算 =============
+	dynamicEnabled := req.Magnitude >= 6.0 // 6级以上启用动力分析
+	parallelWorkers := 4                   // 4个结构并行计算
+
+	if dynamicEnabled {
+		type dynResult struct {
+			name         string
+			dispMax      float64
+			accMax       float64
+			baseShear    float64
+			damageDynamic float64
+		}
+
+		structures := []struct {
+			name string
+			loc  StructureLocation
+			mass float64 // 结构质量(t)
+			stiff float64 // 刚度(N/m)
+			damp  float64 // 阻尼比
+		}{
+			{"yuzui",     yuzuiLoc,     2.5e6, 1.2e9, 0.05},
+			{"feishayan", feishayanLoc, 1.8e6, 8.5e8, 0.05},
+			{"baopingkou", baopingkouLoc, 3.0e6, 1.5e9, 0.05},
+			{"renzidi",   renzidiLoc,   1.2e6, 6.0e8, 0.05},
+		}
+
+		// Newmark-β 方法参数
+		beta := 0.25
+		gamma := 0.5
+		dt := 0.005 // 5ms时间步
+		nSteps := int(req.DurationSeconds / dt)
+
+		// 生成人工地震波（作为激励加速度时程）
+		earthquakeWave := make([]float64, nSteps)
+		for i := 0; i < nSteps; i++ {
+			t := float64(i) * dt
+			freq := 2.0 + 3.0*rand.Float64() // 2-5Hz
+			envelope := 1.0
+			if t < 2.0 {
+				envelope = t / 2.0
+			} else if t > req.DurationSeconds-2.0 {
+				envelope = (req.DurationSeconds - t) / 2.0
+			} else if t > req.DurationSeconds {
+				envelope = 0
+			}
+			earthquakeWave[i] = pga * 9.81 * envelope * (0.6*math.Sin(2*math.Pi*freq*t) + 0.4*rand.NormFloat64())
+		}
+
+		// goroutine 并行计算4个结构的动力响应
+		results := make(chan dynResult, parallelWorkers)
+		var wg sync.WaitGroup
+		wg.Add(parallelWorkers)
+
+		for _, s := range structures {
+			go func(name string, loc StructureLocation, mass, stiff, damp float64) {
+				defer wg.Done()
+				// Newmark-β 积分
+				disp := make([]float64, nSteps)
+				vel := make([]float64, nSteps)
+				acc := make([]float64, nSteps)
+				omega := math.Sqrt(stiff / mass) // 自振圆频率
+				kPrime := stiff + gamma/(beta*dt)*damp + mass/(beta*dt*dt)
+
+				disp[0] = 0
+				vel[0] = 0
+				acc[0] = earthquakeWave[0]
+
+				maxDisp := 0.0
+				maxAcc := 0.0
+
+				for i := 1; i < nSteps; i++ {
+					// 预测位移速度
+					predDisp := disp[i-1] + dt*vel[i-1] + 0.5*dt*dt*(1-2*beta)*acc[i-1]
+					predVel := vel[i-1] + dt*(1-gamma)*acc[i-1]
+					predAcc := earthquakeWave[i]
+
+					// 修正
+					deltaDisp := (predAcc - damp*predVel - stiff*predDisp) / kPrime
+					disp[i] = predDisp + deltaDisp
+					vel[i] = predVel + gamma/beta*deltaDisp/dt
+					acc[i] = predAcc + (gamma/beta - 1)*deltaDisp/(dt*dt)
+
+					if math.Abs(disp[i]) > maxDisp {
+						maxDisp = math.Abs(disp[i])
+					}
+					if math.Abs(acc[i]) > maxAcc {
+						maxAcc = math.Abs(acc[i])
+					}
+				}
+
+				// 计算结构损伤
+				dispLimit := stiff / (omega * omega * mass) * 0.1 // 允许位移的10%
+				damageDynamic := math.Min(1.0, maxDisp/dispLimit)
+
+				results <- dynResult{
+					name:         name,
+					dispMax:      maxDisp,
+					accMax:       maxAcc,
+					baseShear:    maxAcc * mass,
+					damageDynamic: damageDynamic,
+				}
+			}(s.name, s.loc, s.mass, s.stiff, s.damp)
+		}
+
+		wg.Wait()
+		close(results)
+
+		// 收集并行计算结果
+		for r := range results {
+			switch r.name {
+			case "yuzui":
+				yuzuiDynamic = r.damageDynamic
+			case "feishayan":
+				feishayanDynamic = r.damageDynamic
+			case "baopingkou":
+				baopingkouDynamic = r.damageDynamic
+			case "renzidi":
+				renzidiDynamic = r.damageDynamic
+			}
+		}
+	}
+	// ============= 新增结束 =============
 
 	calcDistance := func(loc StructureLocation) float64 {
 		dx := loc.X - req.EpicenterX
@@ -848,6 +974,20 @@ func (h *APIHandler) RunEarthquakeSimulation(c *gin.Context) {
 	feishayanDamage := pga * calcAttenuation(feishayanDist)
 	baopingkouDamage := pga * calcAttenuation(baopingkouDist)
 	renzidiDamage := pga * calcAttenuation(renzidiDist)
+
+	// 合并静态和动力损伤（取较大值）
+	if yuzuiDynamic > 0 {
+		yuzuiDamage = math.Max(yuzuiDamage, yuzuiDynamic)
+	}
+	if feishayanDynamic > 0 {
+		feishayanDamage = math.Max(feishayanDamage, feishayanDynamic)
+	}
+	if baopingkouDynamic > 0 {
+		baopingkouDamage = math.Max(baopingkouDamage, baopingkouDynamic)
+	}
+	if renzidiDynamic > 0 {
+		renzidiDamage = math.Max(renzidiDamage, renzidiDynamic)
+	}
 
 	maxDamage := math.Max(math.Max(yuzuiDamage, feishayanDamage), math.Max(baopingkouDamage, renzidiDamage))
 	safetyAssessment := "safe"
@@ -965,6 +1105,8 @@ func (h *APIHandler) RunEarthquakeSimulation(c *gin.Context) {
 		"safety_assessment":      sim.SafetyAssessment,
 		"time_series_data":       timeSeries,
 		"created_by":             sim.CreatedBy,
+		"dynamic_analysis_enabled": dynamicEnabled,
+		"parallel_workers":       parallelWorkers,
 	})
 }
 

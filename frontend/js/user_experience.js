@@ -19,6 +19,63 @@ class UserExperienceSimulation {
         this.isDragging = false;
         this.dragOffset = { x: 0, y: 0 };
 
+        // ===== 竹笼编织引导系统 =====
+        this.tutorialMode = true;  // 默认开启新手教程
+        this.bambooWeavingSteps = [
+            {
+                id: 1,
+                title: '第一步：选竹',
+                description: '选取3年生慈竹或毛竹，直径10-15cm，直度好，无虫蛀',
+                canvasHint: '点击左侧竹料堆选择合适的竹子',
+                targetAction: 'select_bamboo',
+                completed: false
+            },
+            {
+                id: 2,
+                title: '第二步：破篾',
+                description: '用篾刀将竹材破成宽约6分(2cm)、厚约1分(3mm)的竹篾',
+                canvasHint: '按住鼠标左键沿竹子纵向拖动破篾',
+                targetAction: 'cut_bamboo',
+                completed: false
+            },
+            {
+                id: 3,
+                title: '第三步：编笼',
+                description: '采用"六角编"技法，先编底、再编身、最后收编口部，形成圆筒形',
+                canvasHint: '点击竹篾交叉点进行编织，形成圆筒形状',
+                targetAction: 'weave_cage',
+                completed: false
+            },
+            {
+                id: 4,
+                title: '第四步：装石',
+                description: '将卵石装入竹笼，大面朝下，级配填充，每笼约装卵石80-120个',
+                canvasHint: '拖动卵石到竹笼中进行装填',
+                targetAction: 'fill_stones',
+                completed: false
+            },
+            {
+                id: 5,
+                title: '第五步：封口',
+                description: '用木楔加固笼口，篾条收紧扎牢，确保运输和投放时不散架',
+                canvasHint: '点击笼口进行封口加固',
+                targetAction: 'seal_cage',
+                completed: false
+            },
+            {
+                id: 6,
+                title: '第六步：投放',
+                description: '竹笼运至指定位置，船载定位，人工辅助抛投入水',
+                canvasHint: '点击投放按钮将竹笼放入江中',
+                targetAction: 'deploy_cage',
+                completed: false
+            }
+        ];
+        this.currentBambooStep = 0;
+        this.guideOverlayActive = false;
+        this.showTutorial = true;
+        this.tutorialCompleted = false;
+
         this.operationCount = 0;
         this.interceptionEfficiency = 0;
         this.stabilityScore = 0;
@@ -39,6 +96,25 @@ class UserExperienceSimulation {
 
         this.wolongIronY = 0;
         this.riverbedBaseY = 0;
+
+        if (!document.getElementById('tutorial-style')) {
+            const style = document.createElement('style');
+            style.id = 'tutorial-style';
+            style.textContent = `
+                .tutorial-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+                .tutorial-card { background: white; padding: 24px; border-radius: 12px; max-width: 420px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); animation: slideUp 0.3s ease; }
+                .tutorial-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+                .tutorial-step { background: #3498db; color: white; padding: 4px 12px; border-radius: 12px; font-size: 14px; font-weight: 600; }
+                .tutorial-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #999; }
+                .tutorial-hint { background: #fff9e6; padding: 12px; border-radius: 8px; margin: 16px 0; border-left: 4px solid #f39c12; font-size: 14px; }
+                .tutorial-progress { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+                .tutorial-dot { width: 12px; height: 12px; border-radius: 50%; background: #ddd; }
+                .tutorial-dot.active { background: #3498db; transform: scale(1.2); }
+                .tutorial-dot.completed { background: #2ecc71; }
+                @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+            `;
+            document.head.appendChild(style);
+        }
 
         this.initCanvas();
         this.initSession();
@@ -604,6 +680,14 @@ class UserExperienceSimulation {
     }
 
     placeBambooCage(x, y) {
+        if (this.tutorialMode && !this.tutorialCompleted) {
+            const success = this.advanceBambooStep('deploy_cage');
+            if (!success) {
+                this.showTutorialHint('请先完成编织前序步骤！');
+                return;
+            }
+        }
+
         const bamboo = {
             id: 'bamboo_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
             type: 'bamboo',
@@ -990,6 +1074,14 @@ class UserExperienceSimulation {
         this.selectedTool = null;
         this.selectedObject = null;
         this.isDragging = false;
+
+        this.tutorialMode = true;
+        this.currentBambooStep = 0;
+        this.bambooWeavingSteps.forEach(s => s.completed = false);
+        this.guideOverlayActive = false;
+        this.showTutorial = true;
+        this.tutorialCompleted = false;
+
         this.operationCount = 0;
         this.interceptionEfficiency = 0;
         this.stabilityScore = 0;
@@ -1011,6 +1103,94 @@ class UserExperienceSimulation {
         if (timerEl) timerEl.textContent = '00:00';
 
         this.ctx.clearRect(0, 0, this.width, this.height);
+    }
+
+    startBambooTutorial() {
+        this.tutorialMode = true;
+        this.currentBambooStep = 0;
+        this.bambooWeavingSteps.forEach(s => s.completed = false);
+        this.guideOverlayActive = true;
+        this.showTutorial = true;
+        this.tutorialCompleted = false;
+        this.updateTutorialUI();
+    }
+
+    advanceBambooStep(actionType) {
+        if (!this.tutorialMode || this.currentBambooStep >= this.bambooWeavingSteps.length) return;
+        const currentStep = this.bambooWeavingSteps[this.currentBambooStep];
+        if (actionType === currentStep.targetAction) {
+            currentStep.completed = true;
+            this.currentBambooStep++;
+            this.addAchievement('bamboo_weaving_progress', `完成${this.currentBambooStep}/6步`);
+            if (this.currentBambooStep >= this.bambooWeavingSteps.length) {
+                this.tutorialCompleted = true;
+                this.guideOverlayActive = false;
+                this.addAchievement('bamboo_master', '完整完成竹笼编织');
+            }
+            this.updateTutorialUI();
+            return true;
+        }
+        return false;
+    }
+
+    updateTutorialUI() {
+        const guideEl = document.getElementById('bamboo-guide-overlay');
+        if (!guideEl && this.guideOverlayActive) {
+            const overlay = document.createElement('div');
+            overlay.id = 'bamboo-guide-overlay';
+            overlay.className = 'tutorial-overlay';
+            document.body.appendChild(overlay);
+        }
+        if (guideEl) {
+            if (this.guideOverlayActive && this.currentBambooStep < this.bambooWeavingSteps.length) {
+                guideEl.style.display = 'flex';
+                const step = this.bambooWeavingSteps[this.currentBambooStep];
+                const isLastStep = step.targetAction === 'deploy_cage';
+                guideEl.innerHTML = `
+                    <div class="tutorial-card">
+                        <div class="tutorial-header">
+                            <span class="tutorial-step">${step.id}/6</span>
+                            <button class="tutorial-close">×</button>
+                        </div>
+                        <h4>${step.title}</h4>
+                        <p>${step.description}</p>
+                        <div class="tutorial-hint">💡 ${step.canvasHint}</div>
+                        <div class="tutorial-progress">
+                            ${this.bambooWeavingSteps.map((s, i) => 
+                                `<div class="tutorial-dot ${s.completed ? 'completed' : i === this.currentBambooStep ? 'active' : ''}"></div>`
+                            ).join('')}
+                        </div>
+                        ${!isLastStep ? `<button class="tutorial-next-btn" style="margin-top: 16px; width: 100%; padding: 12px; background: #3498db; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer;">下一步</button>` : `<div style="margin-top: 16px; padding: 12px; background: #e8f5e9; border-radius: 8px; text-align: center; color: #2e7d32;">请在画布上点击放置竹笼完成最后一步</div>`}
+                    </div>
+                `;
+                const closeBtn = guideEl.querySelector('.tutorial-close');
+                if (closeBtn) {
+                    closeBtn.onclick = () => {
+                        this.guideOverlayActive = false;
+                        guideEl.style.display = 'none';
+                    };
+                }
+                const nextBtn = guideEl.querySelector('.tutorial-next-btn');
+                if (nextBtn) {
+                    nextBtn.onclick = () => {
+                        this.advanceBambooStep(step.targetAction);
+                    };
+                }
+            } else if (this.tutorialCompleted) {
+                guideEl.style.display = 'none';
+            }
+        }
+    }
+
+    addAchievement(key, message) {
+        if (!this.achievements[key]) {
+            this.achievements[key] = true;
+            this.queueAchievement(message);
+        }
+    }
+
+    showTutorialHint(message) {
+        this.queueAchievement(message);
     }
 }
 
@@ -1066,6 +1246,13 @@ document.addEventListener('DOMContentLoaded', () => {
             sim.reset();
             sim.start();
         });
+
+        const tutorialBtn = document.createElement('button');
+        tutorialBtn.id = 'start-tutorial';
+        tutorialBtn.className = 'btn-secondary';
+        tutorialBtn.textContent = '编织教程';
+        tutorialBtn.onclick = () => sim.startBambooTutorial();
+        resetBtn.parentNode.insertBefore(tutorialBtn, resetBtn.nextSibling);
     }
 
     const startBtn = document.getElementById('start-experience');
@@ -1078,6 +1265,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!sim.running) {
         sim.start();
     }
+
+    sim.startBambooTutorial();
 
     sim.loadAchievements();
     sim.updateAchievementDisplay();
