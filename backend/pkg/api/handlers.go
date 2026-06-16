@@ -4,18 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"math"
-	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"dujiangyan-system/pkg/craft_comparator"
+	"dujiangyan-system/pkg/era_comparator"
+	"dujiangyan-system/pkg/earthquake_simulator"
 	"dujiangyan-system/pkg/models"
 	"dujiangyan-system/pkg/mqtt"
 	"dujiangyan-system/pkg/simulation"
+	"dujiangyan-system/pkg/vr_maintenance"
 )
 
 var upgrader = websocket.Upgrader{
@@ -361,11 +363,13 @@ func (h *APIHandler) RunBedEvolutionPrediction(c *gin.Context) {
 		years = req.Years
 	}
 
-	results, err := simulation.PredictBedEvolution(h.ctx, stationID, years)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	asyncCh := simulation.PredictBedEvolutionAsync(h.ctx, stationID, years)
+	asyncResult := <-asyncCh
+	if asyncResult.Err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": asyncResult.Err.Error()})
 		return
 	}
+	results := asyncResult.Results
 
 	var baseElevation float64 = 726.5
 	latestData, err := models.GetLatestHydrologyData(h.ctx, stationID)
@@ -380,14 +384,14 @@ func (h *APIHandler) RunBedEvolutionPrediction(c *gin.Context) {
 		for month := 0; month < 12; month++ {
 			monthFraction := float64(yearIdx) + float64(month)/12.0
 			seasonalFactor := math.Sin(monthFraction*2*math.Pi/1.0) * 0.02
-			
+
 			monthlyDeposition := annualResult.Deposition / 12.0 * (1 + seasonalFactor)
 			monthlyErosion := annualResult.Erosion / 12.0 * (1 - seasonalFactor)
 			elevationChange := annualResult.PredictedElevation - baseElevation
 			elevationChange += (float64(month) / 12.0) * (annualResult.NetChange)
 
 			predDate := time.Now().AddDate(yearIdx, month, 0)
-			
+
 			monthlyPredictions = append(monthlyPredictions, map[string]interface{}{
 				"prediction_date":      predDate,
 				"bed_elevation_change": elevationChange,
@@ -406,7 +410,7 @@ func (h *APIHandler) RunBedEvolutionPrediction(c *gin.Context) {
 	avgAnnualDeposition = avgAnnualDeposition / float64(years) * 12
 	avgAnnualErosion = avgAnnualErosion / float64(years) * 12
 	finalElevation := results[len(results)-1].PredictedElevation
-	
+
 	riskLevel := "低"
 	elevationDiff := finalElevation - baseElevation
 	if elevationDiff > 0.3 {
@@ -418,7 +422,7 @@ func (h *APIHandler) RunBedEvolutionPrediction(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"station_id":               stationID,
 		"years":                    years,
-		"model":                    "Sediment Transport Model v1.0",
+		"model":                    "Sediment Transport Model v2.0 (async goroutine)",
 		"base_elevation":           baseElevation,
 		"predictions":              monthlyPredictions,
 		"average_annual_deposition": avgAnnualDeposition,
@@ -767,7 +771,8 @@ func (h *APIHandler) GetDynastyTechniques(c *gin.Context) {
 	dynasty := c.Query("dynasty")
 	category := c.Query("category")
 
-	data, err := models.GetDynastyTechniques(h.ctx, dynasty, category)
+	comp := craft_comparator.NewCraftComparator(h.ctx)
+	data, err := comp.GetTechniques(dynasty, category)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -782,7 +787,8 @@ func (h *APIHandler) GetDynastyTechniques(c *gin.Context) {
 func (h *APIHandler) GetModernComparisons(c *gin.Context) {
 	category := c.Query("category")
 
-	data, err := models.GetModernComparisons(h.ctx, category)
+	comp := era_comparator.NewEraComparator(h.ctx)
+	data, err := comp.GetComparisons(category)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -805,12 +811,6 @@ type EarthquakeSimulationRequest struct {
 	CreatedBy       string  `json:"created_by"`
 }
 
-type StructureLocation struct {
-	X float64
-	Y float64
-	Z float64
-}
-
 func (h *APIHandler) RunEarthquakeSimulation(c *gin.Context) {
 	var req EarthquakeSimulationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -818,275 +818,46 @@ func (h *APIHandler) RunEarthquakeSimulation(c *gin.Context) {
 		return
 	}
 
-	var yuzuiDynamic, feishayanDynamic, baopingkouDynamic, renzidiDynamic float64
-
 	if req.FocalMechanism == "" {
 		req.FocalMechanism = "strike-slip"
 	}
 
-	pga := math.Pow(10, 0.5*req.Magnitude-3)
-
-	yuzuiLoc := StructureLocation{X: 100, Y: 50, Z: 730}
-	feishayanLoc := StructureLocation{X: 150, Y: 30, Z: 728}
-	baopingkouLoc := StructureLocation{X: 200, Y: 60, Z: 725}
-	renzidiLoc := StructureLocation{X: 80, Y: 80, Z: 727}
-
-	// ============= 新增：Newmark-β 动力时程积分 & 并行计算 =============
-	dynamicEnabled := req.Magnitude >= 6.0 // 6级以上启用动力分析
-	parallelWorkers := 4                   // 4个结构并行计算
-
-	if dynamicEnabled {
-		type dynResult struct {
-			name         string
-			dispMax      float64
-			accMax       float64
-			baseShear    float64
-			damageDynamic float64
-		}
-
-		structures := []struct {
-			name string
-			loc  StructureLocation
-			mass float64 // 结构质量(t)
-			stiff float64 // 刚度(N/m)
-			damp  float64 // 阻尼比
-		}{
-			{"yuzui",     yuzuiLoc,     2.5e6, 1.2e9, 0.05},
-			{"feishayan", feishayanLoc, 1.8e6, 8.5e8, 0.05},
-			{"baopingkou", baopingkouLoc, 3.0e6, 1.5e9, 0.05},
-			{"renzidi",   renzidiLoc,   1.2e6, 6.0e8, 0.05},
-		}
-
-		// Newmark-β 方法参数
-		beta := 0.25
-		gamma := 0.5
-		dt := 0.005 // 5ms时间步
-		nSteps := int(req.DurationSeconds / dt)
-
-		// 生成人工地震波（作为激励加速度时程）
-		earthquakeWave := make([]float64, nSteps)
-		for i := 0; i < nSteps; i++ {
-			t := float64(i) * dt
-			freq := 2.0 + 3.0*rand.Float64() // 2-5Hz
-			envelope := 1.0
-			if t < 2.0 {
-				envelope = t / 2.0
-			} else if t > req.DurationSeconds-2.0 {
-				envelope = (req.DurationSeconds - t) / 2.0
-			} else if t > req.DurationSeconds {
-				envelope = 0
-			}
-			earthquakeWave[i] = pga * 9.81 * envelope * (0.6*math.Sin(2*math.Pi*freq*t) + 0.4*rand.NormFloat64())
-		}
-
-		// goroutine 并行计算4个结构的动力响应
-		results := make(chan dynResult, parallelWorkers)
-		var wg sync.WaitGroup
-		wg.Add(parallelWorkers)
-
-		for _, s := range structures {
-			go func(name string, loc StructureLocation, mass, stiff, damp float64) {
-				defer wg.Done()
-				// Newmark-β 积分
-				disp := make([]float64, nSteps)
-				vel := make([]float64, nSteps)
-				acc := make([]float64, nSteps)
-				omega := math.Sqrt(stiff / mass) // 自振圆频率
-				kPrime := stiff + gamma/(beta*dt)*damp + mass/(beta*dt*dt)
-
-				disp[0] = 0
-				vel[0] = 0
-				acc[0] = earthquakeWave[0]
-
-				maxDisp := 0.0
-				maxAcc := 0.0
-
-				for i := 1; i < nSteps; i++ {
-					// 预测位移速度
-					predDisp := disp[i-1] + dt*vel[i-1] + 0.5*dt*dt*(1-2*beta)*acc[i-1]
-					predVel := vel[i-1] + dt*(1-gamma)*acc[i-1]
-					predAcc := earthquakeWave[i]
-
-					// 修正
-					deltaDisp := (predAcc - damp*predVel - stiff*predDisp) / kPrime
-					disp[i] = predDisp + deltaDisp
-					vel[i] = predVel + gamma/beta*deltaDisp/dt
-					acc[i] = predAcc + (gamma/beta - 1)*deltaDisp/(dt*dt)
-
-					if math.Abs(disp[i]) > maxDisp {
-						maxDisp = math.Abs(disp[i])
-					}
-					if math.Abs(acc[i]) > maxAcc {
-						maxAcc = math.Abs(acc[i])
-					}
-				}
-
-				// 计算结构损伤
-				dispLimit := stiff / (omega * omega * mass) * 0.1 // 允许位移的10%
-				damageDynamic := math.Min(1.0, maxDisp/dispLimit)
-
-				results <- dynResult{
-					name:         name,
-					dispMax:      maxDisp,
-					accMax:       maxAcc,
-					baseShear:    maxAcc * mass,
-					damageDynamic: damageDynamic,
-				}
-			}(s.name, s.loc, s.mass, s.stiff, s.damp)
-		}
-
-		wg.Wait()
-		close(results)
-
-		// 收集并行计算结果
-		for r := range results {
-			switch r.name {
-			case "yuzui":
-				yuzuiDynamic = r.damageDynamic
-			case "feishayan":
-				feishayanDynamic = r.damageDynamic
-			case "baopingkou":
-				baopingkouDynamic = r.damageDynamic
-			case "renzidi":
-				renzidiDynamic = r.damageDynamic
-			}
-		}
-	}
-	// ============= 新增结束 =============
-
-	calcDistance := func(loc StructureLocation) float64 {
-		dx := loc.X - req.EpicenterX
-		dy := loc.Y - req.EpicenterY
-		dz := loc.Z - req.EpicenterZ
-		return math.Sqrt(dx*dx + dy*dy + dz*dz)
+	simReq := earthquake_simulator.SimulationRequest{
+		SimulationName:  req.SimulationName,
+		Magnitude:       req.Magnitude,
+		EpicenterX:      req.EpicenterX,
+		EpicenterY:      req.EpicenterY,
+		EpicenterZ:      req.EpicenterZ,
+		FocalMechanism:  req.FocalMechanism,
+		DurationSeconds: req.DurationSeconds,
+		CreatedBy:       req.CreatedBy,
 	}
 
-	calcAttenuation := func(distance float64) float64 {
-		return math.Exp(-0.001 * distance)
-	}
-
-	yuzuiDist := calcDistance(yuzuiLoc)
-	feishayanDist := calcDistance(feishayanLoc)
-	baopingkouDist := calcDistance(baopingkouLoc)
-	renzidiDist := calcDistance(renzidiLoc)
-
-	yuzuiDamage := pga * calcAttenuation(yuzuiDist)
-	feishayanDamage := pga * calcAttenuation(feishayanDist)
-	baopingkouDamage := pga * calcAttenuation(baopingkouDist)
-	renzidiDamage := pga * calcAttenuation(renzidiDist)
-
-	// 合并静态和动力损伤（取较大值）
-	if yuzuiDynamic > 0 {
-		yuzuiDamage = math.Max(yuzuiDamage, yuzuiDynamic)
-	}
-	if feishayanDynamic > 0 {
-		feishayanDamage = math.Max(feishayanDamage, feishayanDynamic)
-	}
-	if baopingkouDynamic > 0 {
-		baopingkouDamage = math.Max(baopingkouDamage, baopingkouDynamic)
-	}
-	if renzidiDynamic > 0 {
-		renzidiDamage = math.Max(renzidiDamage, renzidiDynamic)
-	}
-
-	maxDamage := math.Max(math.Max(yuzuiDamage, feishayanDamage), math.Max(baopingkouDamage, renzidiDamage))
-	safetyAssessment := "safe"
-	if maxDamage > 0.6 {
-		safetyAssessment = "danger"
-	} else if maxDamage > 0.3 {
-		safetyAssessment = "caution"
-	}
-
-	timeStep := 0.01
-	numSteps := int(req.DurationSeconds / timeStep)
-	timeSeries := make([]map[string]interface{}, 0, numSteps)
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	for i := 0; i < numSteps; i++ {
-		t := float64(i) * timeStep
-		amplitude := pga * math.Exp(-0.5*t) * (1 + 0.3*r.Float64())
-		acceleration := amplitude * math.Sin(2*math.Pi*2*t) * (1 + 0.2*r.Float64())
-		timeSeries = append(timeSeries, map[string]interface{}{
-			"time":         t,
-			"acceleration": acceleration,
-			"displacement": acceleration * 0.1,
-		})
-	}
-	timeSeriesJSON, _ := json.Marshal(timeSeries)
-
-	structureDamage := map[string]interface{}{
-		"yuzui": map[string]interface{}{
-			"damage_level":  yuzuiDamage,
-			"cracks":        int(yuzuiDamage * 10),
-			"settlement_mm": yuzuiDamage * 50,
-		},
-		"feishayan": map[string]interface{}{
-			"damage_level":  feishayanDamage,
-			"cracks":        int(feishayanDamage * 10),
-			"settlement_mm": feishayanDamage * 50,
-		},
-		"baopingkou": map[string]interface{}{
-			"damage_level":  baopingkouDamage,
-			"cracks":        int(baopingkouDamage * 10),
-			"settlement_mm": baopingkouDamage * 50,
-		},
-		"renzidi": map[string]interface{}{
-			"damage_level":  renzidiDamage,
-			"cracks":        int(renzidiDamage * 10),
-			"settlement_mm": renzidiDamage * 50,
-		},
-	}
-	structureDamageJSON, _ := json.Marshal(structureDamage)
-
-	bankCollapse := make([]map[string]interface{}, 0)
-	if maxDamage > 0.3 {
-		collapseCount := int(maxDamage * 20)
-		for i := 0; i < collapseCount; i++ {
-			bankCollapse = append(bankCollapse, map[string]interface{}{
-				"position_x":  100 + r.Float64()*200,
-				"position_y":  20 + r.Float64()*80,
-				"volume_m3":   10 + r.Float64()*100,
-				"collapse_at": r.Float64() * req.DurationSeconds,
-			})
-		}
-	}
-	bankCollapseJSON, _ := json.Marshal(bankCollapse)
-
-	sedimentDisturbance := pga * 0.5
-	flowPathChange := pga * 0.3
-	waterDiversionChange := pga * 0.2
-
-	sim := &models.EarthquakeSimulation{
-		SimulationName:       req.SimulationName,
-		Magnitude:            req.Magnitude,
-		EpicenterX:           req.EpicenterX,
-		EpicenterY:           req.EpicenterY,
-		EpicenterZ:           req.EpicenterZ,
-		FocalMechanism:       req.FocalMechanism,
-		PGA:                  pga,
-		DurationSeconds:      req.DurationSeconds,
-		TimeSeriesData:       string(timeSeriesJSON),
-		StructureDamage:      string(structureDamageJSON),
-		YuzuiDamage:          yuzuiDamage,
-		FeishayanDamage:      feishayanDamage,
-		BaopingkouDamage:     baopingkouDamage,
-		RenzidiDamage:        renzidiDamage,
-		BankCollapse:         string(bankCollapseJSON),
-		SedimentDisturbance:  sedimentDisturbance,
-		FlowPathChange:       flowPathChange,
-		WaterDiversionChange: waterDiversionChange,
-		SafetyAssessment:     safetyAssessment,
-		CreatedBy:            req.CreatedBy,
-	}
-
-	id, err := models.InsertEarthquakeSimulation(h.ctx, sim)
+	simulator := earthquake_simulator.NewEarthquakeSimulator(h.ctx, 4)
+	result, err := simulator.Run(simReq)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	sim.ID = id
+
+	sim := result.Simulation
+	structureDamage := map[string]interface{}{}
+	if sim.StructureDamage != "" {
+		json.Unmarshal([]byte(sim.StructureDamage), &structureDamage)
+	}
+
+	bankCollapse := []interface{}{}
+	if sim.BankCollapse != "" {
+		json.Unmarshal([]byte(sim.BankCollapse), &bankCollapse)
+	}
+
+	timeSeries := []interface{}{}
+	if sim.TimeSeriesData != "" {
+		json.Unmarshal([]byte(sim.TimeSeriesData), &timeSeries)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":                     id,
+		"id":                     sim.ID,
 		"simulation_name":        sim.SimulationName,
 		"magnitude":              sim.Magnitude,
 		"pga":                    sim.PGA,
@@ -1105,8 +876,8 @@ func (h *APIHandler) RunEarthquakeSimulation(c *gin.Context) {
 		"safety_assessment":      sim.SafetyAssessment,
 		"time_series_data":       timeSeries,
 		"created_by":             sim.CreatedBy,
-		"dynamic_analysis_enabled": dynamicEnabled,
-		"parallel_workers":       parallelWorkers,
+		"dynamic_analysis_enabled": result.DynamicAnalysisEnabled,
+		"parallel_workers":       result.ParallelWorkers,
 	})
 }
 
@@ -1152,29 +923,26 @@ func (h *APIHandler) InsertUserOperation(c *gin.Context) {
 		return
 	}
 
-	op := &models.UserRepairOperation{
-		SessionID:             req.SessionID,
-		UserNickname:          req.UserNickname,
-		OperationType:         req.OperationType,
-		ObjectType:            req.ObjectType,
-		PositionX:             req.PositionX,
-		PositionY:             req.PositionY,
-		PositionZ:             req.PositionZ,
-		RotationAngle:         req.RotationAngle,
-		ObjectParams:          req.ObjectParams,
-		OperationOrder:        req.OperationOrder,
+	vr := vr_maintenance.NewVRMaintenance(h.ctx)
+	op, err := vr.RecordOperation(vr_maintenance.OperationRequest{
+		SessionID:              req.SessionID,
+		UserNickname:           req.UserNickname,
+		OperationType:          req.OperationType,
+		ObjectType:             req.ObjectType,
+		PositionX:              req.PositionX,
+		PositionY:              req.PositionY,
+		PositionZ:              req.PositionZ,
+		RotationAngle:          req.RotationAngle,
+		ObjectParams:           req.ObjectParams,
+		OperationOrder:         req.OperationOrder,
 		InterceptionEfficiency: req.InterceptionEfficiency,
-		StabilityScore:        req.StabilityScore,
-		DredgingVolume:        req.DredgingVolume,
-		CompletionStatus:      "in_progress",
-	}
-
-	id, err := models.InsertUserOperation(h.ctx, op)
+		StabilityScore:         req.StabilityScore,
+		DredgingVolume:         req.DredgingVolume,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	op.ID = id
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Operation recorded successfully",
@@ -1185,7 +953,8 @@ func (h *APIHandler) InsertUserOperation(c *gin.Context) {
 func (h *APIHandler) GetUserOperations(c *gin.Context) {
 	sessionID := c.Param("session_id")
 
-	data, err := models.GetUserOperations(h.ctx, sessionID)
+	vr := vr_maintenance.NewVRMaintenance(h.ctx)
+	data, err := vr.GetOperations(sessionID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -1213,7 +982,14 @@ func (h *APIHandler) FinishUserSession(c *gin.Context) {
 		return
 	}
 
-	err := models.UpdateUserSessionScore(h.ctx, req.SessionID, req.TotalScore, req.CompletionStatus, req.Achievement, req.DurationSeconds)
+	vr := vr_maintenance.NewVRMaintenance(h.ctx)
+	err := vr.FinishSession(vr_maintenance.SessionResult{
+		SessionID:        req.SessionID,
+		TotalScore:       req.TotalScore,
+		CompletionStatus: req.CompletionStatus,
+		Achievement:      req.Achievement,
+		DurationSeconds:  req.DurationSeconds,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -1236,7 +1012,8 @@ func (h *APIHandler) GetUserRanking(c *gin.Context) {
 		limit, _ = strconv.Atoi(limitStr)
 	}
 
-	data, err := models.GetUserScoreRanking(h.ctx, limit)
+	vr := vr_maintenance.NewVRMaintenance(h.ctx)
+	data, err := vr.GetRanking(limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

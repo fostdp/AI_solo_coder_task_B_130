@@ -1,3 +1,4 @@
+(function(global) {
 class EarthquakeSimulation {
     constructor() {
         this.canvas = null;
@@ -976,3 +977,7 @@ document.addEventListener('DOMContentLoaded', () => {
         initEarthquakeSimulation();
     }
 });
+
+global.EarthquakeSimulator = EarthquakeSimulation;
+global.initEarthquakeSimulation = initEarthquakeSimulation;
+})(window);

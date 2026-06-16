@@ -1,3 +1,4 @@
+(function(global) {
 let qinLiBingData = [];
 let qingData = [];
 let currentCategory = 'all';
@@ -534,3 +535,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderCards();
     renderCharts();
 });
+
+window.initDynastyCompareDOM = initDynastyCompareDOM;
+window.DynastyCompare = { init: initDynastyCompareDOM, loadData: loadDynastyData };
+})(window);

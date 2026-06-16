@@ -1,3 +1,4 @@
+(function(global) {
 let modernComparisonData = [];
 let modernComparisonGrouped = {};
 let modernCardCharts = {};
@@ -490,3 +491,12 @@ document.addEventListener('DOMContentLoaded', () => {
     initCategoryDropdown();
     loadModernComparisons();
 });
+
+window.initCategoryDropdown = initCategoryDropdown;
+global.EraComparator = {
+    init: initCategoryDropdown,
+    loadData: loadModernComparisons,
+    data: function() { return modernComparisonData; },
+    group: function() { return modernComparisonGrouped; }
+};
+})(window);

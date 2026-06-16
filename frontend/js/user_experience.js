@@ -1,3 +1,4 @@
+(function(global) {
 class UserExperienceSimulation {
     constructor(canvasId) {
         this.canvas = document.getElementById(canvasId);
@@ -1272,3 +1273,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sim.updateAchievementDisplay();
     sim.showLeaderboard();
 });
+
+global.VRMaintenance = UserExperienceSimulation;
+global.initUserExperience = initUserExperience;
+})(window);

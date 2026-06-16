@@ -181,6 +181,25 @@ func isStationUpstreamOfWeir(stationID, weirName string) bool {
 	return false
 }
 
+type BedEvolutionAsyncResult struct {
+	Results []BedEvolutionResult
+	Err     error
+}
+
+func PredictBedEvolutionAsync(
+	ctx context.Context,
+	stationID string,
+	years int,
+) <-chan BedEvolutionAsyncResult {
+	ch := make(chan BedEvolutionAsyncResult, 1)
+	go func() {
+		defer close(ch)
+		results, err := PredictBedEvolution(ctx, stationID, years)
+		ch <- BedEvolutionAsyncResult{Results: results, Err: err}
+	}()
+	return ch
+}
+
 func PredictBedEvolution(
 	ctx context.Context,
 	stationID string,
