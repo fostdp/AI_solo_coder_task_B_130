@@ -38,5 +38,60 @@ const CONFIG = {
         waijiang: { position: { x: -50, y: 40, z: 30 }, target: { x: 20, y: 0, z: 0 } },
         baopingkou: { position: { x: 0, y: 30, z: 60 }, target: { x: 0, y: 0, z: 40 } },
         feishayan: { position: { x: 30, y: 25, z: -20 }, target: { x: 20, y: 0, z: -10 } }
+    },
+
+    DYNAMIC_CATEGORIES: {
+        macha: '杩槎',
+        bamboo: '竹笼',
+        dredging: '淘淤',
+        wolong: '卧铁',
+        dike: '堤防'
+    },
+
+    COMPARISON_CATEGORIES: {
+        technology: '技术',
+        cost: '成本',
+        efficiency: '效率',
+        environment: '生态',
+        material: '材料'
+    },
+
+    EARTHQUAKE_PRESETS: {
+        wenchuan: {
+            name: '汶川8.0',
+            magnitude: 8.0,
+            depth_km: 14,
+            lat: 31.0,
+            lng: 103.4,
+            duration_sec: 120,
+            impact_radius_km: 300
+        },
+        diexi: {
+            name: '叠溪7.5',
+            magnitude: 7.5,
+            depth_km: 10,
+            lat: 32.0,
+            lng: 103.7,
+            duration_sec: 90,
+            impact_radius_km: 200
+        },
+        pengzhou: {
+            name: '彭州6.5',
+            magnitude: 6.5,
+            depth_km: 12,
+            lat: 31.1,
+            lng: 103.9,
+            duration_sec: 60,
+            impact_radius_km: 100
+        },
+        small: {
+            name: '小型4.0',
+            magnitude: 4.0,
+            depth_km: 8,
+            lat: 31.0,
+            lng: 103.6,
+            duration_sec: 15,
+            impact_radius_km: 20
+        }
     }
 };

@@ -64,6 +64,14 @@ function switchTab(tabName) {
         loadStationOptions();
     } else if (tabName === 'alerts') {
         loadAlerts();
+    } else if (tabName === 'earthquake') {
+        initEarthquakeSimulation();
+    } else if (tabName === 'dynasty') {
+        initDynastyCompareDOM();
+    } else if (tabName === 'modern') {
+        initCategoryDropdown();
+    } else if (tabName === 'experience') {
+        initUserExperience();
     }
 }
 

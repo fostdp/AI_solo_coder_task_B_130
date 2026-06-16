@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
@@ -72,6 +73,23 @@ func (h *APIHandler) RegisterRoutes(r *gin.Engine) {
 	api.GET("/annual-repair-records", h.GetAnnualRepairRecords)
 	api.GET("/dem-grid", h.GetDEMGrid)
 	api.GET("/evolution-rate/:station_id", h.GetEvolutionRate)
+
+	api.GET("/dynasty-techniques", h.GetDynastyTechniques)
+	api.GET("/modern-comparisons", h.GetModernComparisons)
+
+	earthquake := api.Group("/earthquake")
+	{
+		earthquake.POST("/simulate", h.RunEarthquakeSimulation)
+		earthquake.GET("/list", h.GetEarthquakeSimulations)
+	}
+
+	user := api.Group("/user")
+	{
+		user.POST("/operation", h.InsertUserOperation)
+		user.GET("/operations/:session_id", h.GetUserOperations)
+		user.POST("/session/finish", h.FinishUserSession)
+		user.GET("/ranking", h.GetUserRanking)
+	}
 
 	api.GET("/ws/realtime", h.RealTimeWebSocket)
 }
@@ -741,5 +759,349 @@ func SetupStaticFiles(r *gin.Engine) {
 	r.Static("/frontend", frontendPath)
 	r.GET("/", func(c *gin.Context) {
 		c.File(frontendPath + "/index.html")
+	})
+}
+
+func (h *APIHandler) GetDynastyTechniques(c *gin.Context) {
+	dynasty := c.Query("dynasty")
+	category := c.Query("category")
+
+	data, err := models.GetDynastyTechniques(h.ctx, dynasty, category)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"count": len(data),
+		"data":  data,
+	})
+}
+
+func (h *APIHandler) GetModernComparisons(c *gin.Context) {
+	category := c.Query("category")
+
+	data, err := models.GetModernComparisons(h.ctx, category)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"count": len(data),
+		"data":  data,
+	})
+}
+
+type EarthquakeSimulationRequest struct {
+	SimulationName  string  `json:"simulation_name" binding:"required"`
+	Magnitude       float64 `json:"magnitude" binding:"required,min=0,max=10"`
+	EpicenterX      float64 `json:"epicenter_x" binding:"required"`
+	EpicenterY      float64 `json:"epicenter_y" binding:"required"`
+	EpicenterZ      float64 `json:"epicenter_z"`
+	FocalMechanism  string  `json:"focal_mechanism"`
+	DurationSeconds float64 `json:"duration_seconds" binding:"required,min=1"`
+	CreatedBy       string  `json:"created_by"`
+}
+
+type StructureLocation struct {
+	X float64
+	Y float64
+	Z float64
+}
+
+func (h *APIHandler) RunEarthquakeSimulation(c *gin.Context) {
+	var req EarthquakeSimulationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.FocalMechanism == "" {
+		req.FocalMechanism = "strike-slip"
+	}
+
+	pga := math.Pow(10, 0.5*req.Magnitude-3)
+
+	yuzuiLoc := StructureLocation{X: 100, Y: 50, Z: 730}
+	feishayanLoc := StructureLocation{X: 150, Y: 30, Z: 728}
+	baopingkouLoc := StructureLocation{X: 200, Y: 60, Z: 725}
+	renzidiLoc := StructureLocation{X: 80, Y: 80, Z: 727}
+
+	calcDistance := func(loc StructureLocation) float64 {
+		dx := loc.X - req.EpicenterX
+		dy := loc.Y - req.EpicenterY
+		dz := loc.Z - req.EpicenterZ
+		return math.Sqrt(dx*dx + dy*dy + dz*dz)
+	}
+
+	calcAttenuation := func(distance float64) float64 {
+		return math.Exp(-0.001 * distance)
+	}
+
+	yuzuiDist := calcDistance(yuzuiLoc)
+	feishayanDist := calcDistance(feishayanLoc)
+	baopingkouDist := calcDistance(baopingkouLoc)
+	renzidiDist := calcDistance(renzidiLoc)
+
+	yuzuiDamage := pga * calcAttenuation(yuzuiDist)
+	feishayanDamage := pga * calcAttenuation(feishayanDist)
+	baopingkouDamage := pga * calcAttenuation(baopingkouDist)
+	renzidiDamage := pga * calcAttenuation(renzidiDist)
+
+	maxDamage := math.Max(math.Max(yuzuiDamage, feishayanDamage), math.Max(baopingkouDamage, renzidiDamage))
+	safetyAssessment := "safe"
+	if maxDamage > 0.6 {
+		safetyAssessment = "danger"
+	} else if maxDamage > 0.3 {
+		safetyAssessment = "caution"
+	}
+
+	timeStep := 0.01
+	numSteps := int(req.DurationSeconds / timeStep)
+	timeSeries := make([]map[string]interface{}, 0, numSteps)
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	for i := 0; i < numSteps; i++ {
+		t := float64(i) * timeStep
+		amplitude := pga * math.Exp(-0.5*t) * (1 + 0.3*r.Float64())
+		acceleration := amplitude * math.Sin(2*math.Pi*2*t) * (1 + 0.2*r.Float64())
+		timeSeries = append(timeSeries, map[string]interface{}{
+			"time":         t,
+			"acceleration": acceleration,
+			"displacement": acceleration * 0.1,
+		})
+	}
+	timeSeriesJSON, _ := json.Marshal(timeSeries)
+
+	structureDamage := map[string]interface{}{
+		"yuzui": map[string]interface{}{
+			"damage_level":  yuzuiDamage,
+			"cracks":        int(yuzuiDamage * 10),
+			"settlement_mm": yuzuiDamage * 50,
+		},
+		"feishayan": map[string]interface{}{
+			"damage_level":  feishayanDamage,
+			"cracks":        int(feishayanDamage * 10),
+			"settlement_mm": feishayanDamage * 50,
+		},
+		"baopingkou": map[string]interface{}{
+			"damage_level":  baopingkouDamage,
+			"cracks":        int(baopingkouDamage * 10),
+			"settlement_mm": baopingkouDamage * 50,
+		},
+		"renzidi": map[string]interface{}{
+			"damage_level":  renzidiDamage,
+			"cracks":        int(renzidiDamage * 10),
+			"settlement_mm": renzidiDamage * 50,
+		},
+	}
+	structureDamageJSON, _ := json.Marshal(structureDamage)
+
+	bankCollapse := make([]map[string]interface{}, 0)
+	if maxDamage > 0.3 {
+		collapseCount := int(maxDamage * 20)
+		for i := 0; i < collapseCount; i++ {
+			bankCollapse = append(bankCollapse, map[string]interface{}{
+				"position_x":  100 + r.Float64()*200,
+				"position_y":  20 + r.Float64()*80,
+				"volume_m3":   10 + r.Float64()*100,
+				"collapse_at": r.Float64() * req.DurationSeconds,
+			})
+		}
+	}
+	bankCollapseJSON, _ := json.Marshal(bankCollapse)
+
+	sedimentDisturbance := pga * 0.5
+	flowPathChange := pga * 0.3
+	waterDiversionChange := pga * 0.2
+
+	sim := &models.EarthquakeSimulation{
+		SimulationName:       req.SimulationName,
+		Magnitude:            req.Magnitude,
+		EpicenterX:           req.EpicenterX,
+		EpicenterY:           req.EpicenterY,
+		EpicenterZ:           req.EpicenterZ,
+		FocalMechanism:       req.FocalMechanism,
+		PGA:                  pga,
+		DurationSeconds:      req.DurationSeconds,
+		TimeSeriesData:       string(timeSeriesJSON),
+		StructureDamage:      string(structureDamageJSON),
+		YuzuiDamage:          yuzuiDamage,
+		FeishayanDamage:      feishayanDamage,
+		BaopingkouDamage:     baopingkouDamage,
+		RenzidiDamage:        renzidiDamage,
+		BankCollapse:         string(bankCollapseJSON),
+		SedimentDisturbance:  sedimentDisturbance,
+		FlowPathChange:       flowPathChange,
+		WaterDiversionChange: waterDiversionChange,
+		SafetyAssessment:     safetyAssessment,
+		CreatedBy:            req.CreatedBy,
+	}
+
+	id, err := models.InsertEarthquakeSimulation(h.ctx, sim)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	sim.ID = id
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":                     id,
+		"simulation_name":        sim.SimulationName,
+		"magnitude":              sim.Magnitude,
+		"pga":                    sim.PGA,
+		"epicenter":              map[string]float64{"x": sim.EpicenterX, "y": sim.EpicenterY, "z": sim.EpicenterZ},
+		"focal_mechanism":        sim.FocalMechanism,
+		"duration_seconds":       sim.DurationSeconds,
+		"structure_damage":       structureDamage,
+		"yuzui_damage":           sim.YuzuiDamage,
+		"feishayan_damage":       sim.FeishayanDamage,
+		"baopingkou_damage":      sim.BaopingkouDamage,
+		"renzidi_damage":         sim.RenzidiDamage,
+		"bank_collapse":          bankCollapse,
+		"sediment_disturbance":   sim.SedimentDisturbance,
+		"flow_path_change":       sim.FlowPathChange,
+		"water_diversion_change": sim.WaterDiversionChange,
+		"safety_assessment":      sim.SafetyAssessment,
+		"time_series_data":       timeSeries,
+		"created_by":             sim.CreatedBy,
+	})
+}
+
+func (h *APIHandler) GetEarthquakeSimulations(c *gin.Context) {
+	limitStr := c.Query("limit")
+	limit := 50
+	if limitStr != "" {
+		limit, _ = strconv.Atoi(limitStr)
+	}
+
+	data, err := models.GetEarthquakeSimulations(h.ctx, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"count": len(data),
+		"data":  data,
+	})
+}
+
+type UserOperationRequest struct {
+	SessionID             string  `json:"session_id" binding:"required"`
+	UserNickname          string  `json:"user_nickname"`
+	OperationType         string  `json:"operation_type" binding:"required"`
+	ObjectType            string  `json:"object_type"`
+	PositionX             float64 `json:"position_x"`
+	PositionY             float64 `json:"position_y"`
+	PositionZ             float64 `json:"position_z"`
+	RotationAngle         float64 `json:"rotation_angle"`
+	ObjectParams          string  `json:"object_params"`
+	OperationOrder        int     `json:"operation_order" binding:"required"`
+	InterceptionEfficiency float64 `json:"interception_efficiency"`
+	StabilityScore        float64 `json:"stability_score"`
+	DredgingVolume        float64 `json:"dredging_volume"`
+}
+
+func (h *APIHandler) InsertUserOperation(c *gin.Context) {
+	var req UserOperationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	op := &models.UserRepairOperation{
+		SessionID:             req.SessionID,
+		UserNickname:          req.UserNickname,
+		OperationType:         req.OperationType,
+		ObjectType:            req.ObjectType,
+		PositionX:             req.PositionX,
+		PositionY:             req.PositionY,
+		PositionZ:             req.PositionZ,
+		RotationAngle:         req.RotationAngle,
+		ObjectParams:          req.ObjectParams,
+		OperationOrder:        req.OperationOrder,
+		InterceptionEfficiency: req.InterceptionEfficiency,
+		StabilityScore:        req.StabilityScore,
+		DredgingVolume:        req.DredgingVolume,
+		CompletionStatus:      "in_progress",
+	}
+
+	id, err := models.InsertUserOperation(h.ctx, op)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	op.ID = id
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Operation recorded successfully",
+		"data":    op,
+	})
+}
+
+func (h *APIHandler) GetUserOperations(c *gin.Context) {
+	sessionID := c.Param("session_id")
+
+	data, err := models.GetUserOperations(h.ctx, sessionID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"session_id": sessionID,
+		"count":      len(data),
+		"data":       data,
+	})
+}
+
+type FinishSessionRequest struct {
+	SessionID        string  `json:"session_id" binding:"required"`
+	TotalScore       float64 `json:"total_score" binding:"required"`
+	CompletionStatus string  `json:"completion_status" binding:"required"`
+	Achievement      string  `json:"achievement"`
+	DurationSeconds  int     `json:"duration_seconds" binding:"required,min=0"`
+}
+
+func (h *APIHandler) FinishUserSession(c *gin.Context) {
+	var req FinishSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	err := models.UpdateUserSessionScore(h.ctx, req.SessionID, req.TotalScore, req.CompletionStatus, req.Achievement, req.DurationSeconds)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":          "Session finished successfully",
+		"session_id":       req.SessionID,
+		"total_score":      req.TotalScore,
+		"completion_status": req.CompletionStatus,
+		"achievement":      req.Achievement,
+		"duration_seconds": req.DurationSeconds,
+	})
+}
+
+func (h *APIHandler) GetUserRanking(c *gin.Context) {
+	limitStr := c.Query("limit")
+	limit := 100
+	if limitStr != "" {
+		limit, _ = strconv.Atoi(limitStr)
+	}
+
+	data, err := models.GetUserScoreRanking(h.ctx, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"count": len(data),
+		"data":  data,
 	})
 }

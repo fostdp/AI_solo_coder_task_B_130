@@ -130,6 +130,48 @@ const API = {
         getAnnualRepair() {
             return API.get('/annual-repair-records');
         }
+    },
+
+    dynasty: {
+        getTechniques(dynasty, category) {
+            const params = new URLSearchParams();
+            if (dynasty) params.append('dynasty', dynasty);
+            if (category) params.append('category', category);
+            return API.get(`/dynasty-techniques?${params}`);
+        },
+        getModernComparisons(category) {
+            const params = new URLSearchParams();
+            if (category) params.append('category', category);
+            return API.get(`/modern-comparisons?${params}`);
+        }
+    },
+
+    earthquake: {
+        simulate(params) {
+            return API.post('/earthquake/simulate', params);
+        },
+        getList(limit) {
+            const params = new URLSearchParams();
+            if (limit) params.append('limit', limit);
+            return API.get(`/earthquake/list?${params}`);
+        }
+    },
+
+    userExperience: {
+        saveOperation(data) {
+            return API.post('/user/operation', data);
+        },
+        getOperations(sessionId) {
+            return API.get(`/user/operations/${sessionId}`);
+        },
+        finishSession(data) {
+            return API.post('/user/session/finish', data);
+        },
+        getRanking(limit) {
+            const params = new URLSearchParams();
+            if (limit) params.append('limit', limit);
+            return API.get(`/user/ranking?${params}`);
+        }
     }
 };
 

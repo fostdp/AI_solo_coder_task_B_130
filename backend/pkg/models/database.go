@@ -538,3 +538,226 @@ func UpdateSimulationResult(ctx context.Context, simulationID int64, result inte
 	_, err := DB.Exec(ctx, query, result, simulationID)
 	return err
 }
+
+func GetDynastyTechniques(ctx context.Context, dynasty, category string) ([]DynastyRepairTechnique, error) {
+	query := `
+		SELECT id, dynasty, dynasty_name, era_years, technique_name, category,
+			   materials, tools, procedures, macha_params, bamboo_params, dredging_params,
+			   efficiency_score, labor_cost, duration_days, cost_silver_liang,
+			   historical_notes, reference_sources, created_at
+		FROM dynasty_repair_techniques
+		WHERE 1=1
+	`
+	var args []interface{}
+	argIdx := 1
+	if dynasty != "" {
+		query += fmt.Sprintf(" AND dynasty = $%d", argIdx)
+		args = append(args, dynasty)
+		argIdx++
+	}
+	if category != "" {
+		query += fmt.Sprintf(" AND category = $%d", argIdx)
+		args = append(args, category)
+		argIdx++
+	}
+	query += " ORDER BY dynasty, category"
+
+	rows, err := DB.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []DynastyRepairTechnique
+	for rows.Next() {
+		var t DynastyRepairTechnique
+		err := rows.Scan(&t.ID, &t.Dynasty, &t.DynastyName, &t.EraYears, &t.TechniqueName, &t.Category,
+			&t.Materials, &t.Tools, &t.Procedures, &t.MachaParams, &t.BambooParams, &t.DredgingParams,
+			&t.EfficiencyScore, &t.LaborCost, &t.DurationDays, &t.CostSilverLiang,
+			&t.HistoricalNotes, &t.ReferenceSources, &t.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, t)
+	}
+	return results, nil
+}
+
+func GetModernComparisons(ctx context.Context, category string) ([]ModernRepairComparison, error) {
+	query := `
+		SELECT id, comparison_item, category, ancient_method, modern_method,
+			   ancient_efficiency, modern_efficiency, ancient_cost, modern_cost,
+			   ancient_env_impact, modern_env_impact, ancient_equipment, modern_equipment,
+			   labor_ancient, labor_modern, duration_ancient_days, duration_modern_days,
+			   description, created_at
+		FROM modern_repair_comparison
+		WHERE 1=1
+	`
+	var args []interface{}
+	if category != "" {
+		query += " AND category = $1"
+		args = append(args, category)
+	}
+	query += " ORDER BY id"
+
+	rows, err := DB.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []ModernRepairComparison
+	for rows.Next() {
+		var c ModernRepairComparison
+		err := rows.Scan(&c.ID, &c.ComparisonItem, &c.Category, &c.AncientMethod, &c.ModernMethod,
+			&c.AncientEfficiency, &c.ModernEfficiency, &c.AncientCost, &c.ModernCost,
+			&c.AncientEnvImpact, &c.ModernEnvImpact, &c.AncientEquipment, &c.ModernEquipment,
+			&c.LaborAncient, &c.LaborModern, &c.DurationAncientDays, &c.DurationModernDays,
+			&c.Description, &c.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, c)
+	}
+	return results, nil
+}
+
+func InsertEarthquakeSimulation(ctx context.Context, s *EarthquakeSimulation) (int, error) {
+	query := `
+		INSERT INTO earthquake_simulation
+		(simulation_name, magnitude, epicenter_x, epicenter_y, epicenter_z, focal_mechanism,
+		 pga, duration_seconds, time_series_data, structure_damage,
+		 yuzui_damage, feishayan_damage, baopingkou_damage, renzidi_damage,
+		 bank_collapse, sediment_disturbance, flow_path_change, water_diversion_change,
+		 safety_assessment, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+		RETURNING id
+	`
+	var id int
+	err := DB.QueryRow(ctx, query,
+		s.SimulationName, s.Magnitude, s.EpicenterX, s.EpicenterY, s.EpicenterZ, s.FocalMechanism,
+		s.PGA, s.DurationSeconds, s.TimeSeriesData, s.StructureDamage,
+		s.YuzuiDamage, s.FeishayanDamage, s.BaopingkouDamage, s.RenzidiDamage,
+		s.BankCollapse, s.SedimentDisturbance, s.FlowPathChange, s.WaterDiversionChange,
+		s.SafetyAssessment, s.CreatedBy,
+	).Scan(&id)
+	return id, err
+}
+
+func GetEarthquakeSimulations(ctx context.Context, limit int) ([]EarthquakeSimulation, error) {
+	query := `
+		SELECT id, simulation_name, magnitude, epicenter_x, epicenter_y, epicenter_z, focal_mechanism,
+			   pga, duration_seconds, yuzui_damage, feishayan_damage, baopingkou_damage, renzidi_damage,
+			   sediment_disturbance, flow_path_change, water_diversion_change, safety_assessment, created_by, created_at
+		FROM earthquake_simulation
+		ORDER BY created_at DESC
+		LIMIT $1
+	`
+	rows, err := DB.Query(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []EarthquakeSimulation
+	for rows.Next() {
+		var s EarthquakeSimulation
+		err := rows.Scan(&s.ID, &s.SimulationName, &s.Magnitude, &s.EpicenterX, &s.EpicenterY, &s.EpicenterZ, &s.FocalMechanism,
+			&s.PGA, &s.DurationSeconds, &s.YuzuiDamage, &s.FeishayanDamage, &s.BaopingkouDamage, &s.RenzidiDamage,
+			&s.SedimentDisturbance, &s.FlowPathChange, &s.WaterDiversionChange, &s.SafetyAssessment, &s.CreatedBy, &s.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, s)
+	}
+	return results, nil
+}
+
+func InsertUserOperation(ctx context.Context, op *UserRepairOperation) (int, error) {
+	query := `
+		INSERT INTO user_repair_operations
+		(session_id, user_nickname, operation_type, object_type,
+		 position_x, position_y, position_z, rotation_angle, object_params,
+		 operation_order, simulation_result, interception_efficiency, stability_score,
+		 dredging_volume, completion_status, total_score, achievement, duration_seconds)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		RETURNING id
+	`
+	var id int
+	err := DB.QueryRow(ctx, query,
+		op.SessionID, op.UserNickname, op.OperationType, op.ObjectType,
+		op.PositionX, op.PositionY, op.PositionZ, op.RotationAngle, op.ObjectParams,
+		op.OperationOrder, op.SimulationResult, op.InterceptionEfficiency, op.StabilityScore,
+		op.DredgingVolume, op.CompletionStatus, op.TotalScore, op.Achievement, op.DurationSeconds,
+	).Scan(&id)
+	return id, err
+}
+
+func GetUserOperations(ctx context.Context, sessionID string) ([]UserRepairOperation, error) {
+	query := `
+		SELECT id, session_id, user_nickname, operation_type, object_type,
+			   position_x, position_y, position_z, rotation_angle, object_params,
+			   operation_order, interception_efficiency, stability_score, dredging_volume,
+			   completion_status, total_score, achievement, duration_seconds, created_at
+		FROM user_repair_operations
+		WHERE session_id = $1
+		ORDER BY operation_order ASC
+	`
+	rows, err := DB.Query(ctx, query, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []UserRepairOperation
+	for rows.Next() {
+		var op UserRepairOperation
+		err := rows.Scan(&op.ID, &op.SessionID, &op.UserNickname, &op.OperationType, &op.ObjectType,
+			&op.PositionX, &op.PositionY, &op.PositionZ, &op.RotationAngle, &op.ObjectParams,
+			&op.OperationOrder, &op.InterceptionEfficiency, &op.StabilityScore, &op.DredgingVolume,
+			&op.CompletionStatus, &op.TotalScore, &op.Achievement, &op.DurationSeconds, &op.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, op)
+	}
+	return results, nil
+}
+
+func UpdateUserSessionScore(ctx context.Context, sessionID string, totalScore float64, status string, achievement string, duration int) error {
+	query := `
+		UPDATE user_repair_operations
+		SET total_score = $1, completion_status = $2, achievement = $3, duration_seconds = $4
+		WHERE session_id = $5
+	`
+	_, err := DB.Exec(ctx, query, totalScore, status, achievement, duration, sessionID)
+	return err
+}
+
+func GetUserScoreRanking(ctx context.Context, limit int) ([]UserRepairOperation, error) {
+	query := `
+		SELECT DISTINCT ON (session_id)
+			   id, session_id, user_nickname, total_score, completion_status, duration_seconds, created_at
+		FROM user_repair_operations
+		WHERE completion_status = 'completed'
+		ORDER BY session_id, total_score DESC
+		LIMIT $1
+	`
+	rows, err := DB.Query(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []UserRepairOperation
+	for rows.Next() {
+		var op UserRepairOperation
+		err := rows.Scan(&op.ID, &op.SessionID, &op.UserNickname, &op.TotalScore,
+			&op.CompletionStatus, &op.DurationSeconds, &op.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, op)
+	}
+	return results, nil
+}

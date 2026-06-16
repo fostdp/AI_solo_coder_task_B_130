@@ -13,6 +13,7 @@ services:
       - timescaledb_data:/var/lib/postgresql/data
       - ./scripts/init_timescaledb.sql:/docker-entrypoint-initdb.d/01_init.sql
       - ./scripts/timescaledb_retention.sql:/docker-entrypoint-initdb.d/02_retention.sql
+      - ./scripts/init_new_features.sql:/docker-entrypoint-initdb.d/03_new_features.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-dujiangyan} -d ${DB_NAME:-dujiangyan}"]
       interval: 10s

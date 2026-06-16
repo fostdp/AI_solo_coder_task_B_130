@@ -39,6 +39,10 @@
             <button class="tab-btn" data-tab="repair">岁修仿真</button>
             <button class="tab-btn" data-tab="alerts">告警中心</button>
             <button class="tab-btn" data-tab="data">数据监控</button>
+            <button class="tab-btn" data-tab="dynasty">朝代工艺对比</button>
+            <button class="tab-btn" data-tab="modern">古今维护对比</button>
+            <button class="tab-btn" data-tab="earthquake">地震影响模拟</button>
+            <button class="tab-btn" data-tab="experience">虚拟岁修体验</button>
         </nav>
 
         <main class="content">
@@ -367,6 +371,311 @@
                     </div>
                 </div>
             </section>
+
+            <section class="tab-content" id="dynasty">
+                <div class="dynasty-container">
+                    <h3>朝代工艺对比</h3>
+                    <div class="dynasty-columns">
+                        <div class="dynasty-column">
+                            <h4>李冰时期（战国秦）</h4>
+                            <div class="dynasty-info">
+                                <div class="control-group">
+                                    <label>筑堤材料</label>
+                                    <span class="info-value">卵石、竹笼、杩槎</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>调水方式</label>
+                                    <span class="info-value">鱼嘴四六分水</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>排沙机制</label>
+                                    <span class="info-value">飞沙堰正面排沙</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>岁修周期</label>
+                                    <span class="info-value">每年枯水期</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>工程寿命</label>
+                                    <span class="info-value">岁修维护可持续</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>人力投入</label>
+                                    <span class="info-value">约10万工日/年</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="dynasty-column">
+                            <h4>清代</h4>
+                            <div class="dynasty-info">
+                                <div class="control-group">
+                                    <label>筑堤材料</label>
+                                    <span class="info-value">卵石、竹笼、条石</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>调水方式</label>
+                                    <span class="info-value">鱼嘴+金刚堤加固</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>排沙机制</label>
+                                    <span class="info-value">飞沙堰+人工淘淤</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>岁修周期</label>
+                                    <span class="info-value">每年枯水期</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>工程寿命</label>
+                                    <span class="info-value">条石加固延长寿命</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>人力投入</label>
+                                    <span class="info-value">约15万工日/年</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dynasty-charts">
+                        <div class="chart-card">
+                            <h4>综合指标雷达图对比</h4>
+                            <canvas id="dynasty-radar-chart"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <h4>关键指标柱状图对比</h4>
+                            <canvas id="dynasty-bar-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="tab-content" id="modern">
+                <div class="modern-container">
+                    <h3>古今维护对比</h3>
+                    <div class="modern-controls">
+                        <div class="control-group">
+                            <label>对比分类</label>
+                            <select id="modern-category">
+                                <option value="all">全部</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modern-overview-charts">
+                        <div class="chart-card">
+                            <h4>综合指标雷达图对比</h4>
+                            <canvas id="modern-radar-chart"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <h4>各项效率对比（古代 vs 现代）</h4>
+                            <canvas id="modern-efficiency-chart"></canvas>
+                        </div>
+                    </div>
+                    <div class="modern-cards" id="modern-cards">
+                    </div>
+                </div>
+            </section>
+
+            <section class="tab-content" id="earthquake">
+                <div class="earthquake-container">
+                    <h3>地震影响模拟</h3>
+                    <div class="earthquake-controls">
+                        <div class="control-group">
+                            <label>震级 (Richter)</label>
+                            <input type="number" id="eq-magnitude" value="7.0" min="3.0" max="10.0" step="0.1">
+                        </div>
+                        <div class="control-group">
+                            <label>震源深度 (km)</label>
+                            <input type="number" id="eq-depth" value="15" min="1" max="100" step="1">
+                        </div>
+                        <div class="control-group">
+                            <label>震中距 (km)</label>
+                            <input type="number" id="eq-distance" value="20" min="0" max="200" step="1">
+                        </div>
+                        <div class="control-group">
+                            <label>发震机制</label>
+                            <select id="eq-mechanism">
+                                <option value="strike-slip">走滑断层</option>
+                                <option value="thrust">逆冲断层</option>
+                                <option value="normal">正断层</option>
+                            </select>
+                        </div>
+                        <button id="run-earthquake" class="btn-primary">运行模拟</button>
+                    </div>
+                    <div class="earthquake-scene">
+                        <h4>三维震害场景</h4>
+                        <div id="earthquake-3d-container" class="three-canvas"></div>
+                    </div>
+                    <div class="earthquake-results">
+                        <h4>结构损伤评估</h4>
+                        <div class="damage-gauges">
+                            <div class="damage-gauge">
+                                <h5>鱼嘴</h5>
+                                <div class="gauge-container">
+                                    <canvas id="gauge-yuzui"></canvas>
+                                </div>
+                                <span class="damage-value" id="damage-yuzui">-- %</span>
+                            </div>
+                            <div class="damage-gauge">
+                                <h5>飞沙堰</h5>
+                                <div class="gauge-container">
+                                    <canvas id="gauge-feishayan"></canvas>
+                                </div>
+                                <span class="damage-value" id="damage-feishayan">-- %</span>
+                            </div>
+                            <div class="damage-gauge">
+                                <h5>宝瓶口</h5>
+                                <div class="gauge-container">
+                                    <canvas id="gauge-baopingkou"></canvas>
+                                </div>
+                                <span class="damage-value" id="damage-baopingkou">-- %</span>
+                            </div>
+                            <div class="damage-gauge">
+                                <h5>人字堤</h5>
+                                <div class="gauge-container">
+                                    <canvas id="gauge-renzidi"></canvas>
+                                </div>
+                                <span class="damage-value" id="damage-renzidi">-- %</span>
+                            </div>
+                        </div>
+                        <div class="safety-assessment">
+                            <h4>安全评估结果</h4>
+                            <div class="assessment-card" id="safety-assessment">
+                                <div class="control-group">
+                                    <label>整体安全等级</label>
+                                    <span class="info-value safety-level" id="safety-level">--</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>预计修复工期</label>
+                                    <span class="info-value" id="repair-duration">-- 天</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>估算修复费用</label>
+                                    <span class="info-value" id="repair-cost">-- 万元</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>建议措施</label>
+                                    <span class="info-value" id="safety-recommendation">--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="tab-content" id="experience">
+                <div class="experience-container">
+                    <h3>虚拟岁修体验</h3>
+                    <div class="experience-header">
+                        <div class="control-group">
+                            <label>用户昵称</label>
+                            <input type="text" id="user-nickname" placeholder="请输入昵称">
+                        </div>
+                        <div class="control-group">
+                            <label>Session ID</label>
+                            <span class="info-value" id="session-id">--</span>
+                        </div>
+                        <div class="control-group">
+                            <label>用时</label>
+                            <span class="info-value" id="timer">00:00</span>
+                        </div>
+                        <div class="control-group">
+                            <label>实时评分</label>
+                            <span class="info-value score-value" id="realtime-score">0</span>
+                        </div>
+                    </div>
+                    <div class="experience-main">
+                        <div class="experience-canvas-container">
+                            <h4>交互画布 - 拖拽放置杩槎、竹笼或点击淘淤</h4>
+                            <canvas id="experience-canvas" class="sim-canvas"></canvas>
+                            <div class="experience-actions">
+                                <button id="start-experience" class="btn-secondary">开始</button>
+                                <button id="reset-experience" class="btn-secondary">重置</button>
+                                <button id="finish-session" class="btn-primary">完成并提交</button>
+                            </div>
+                        </div>
+                        <div class="experience-sidebar">
+                            <h4>操作工具栏</h4>
+                            <div class="tool-buttons">
+                                <button class="tool-btn" data-tool="macha">
+                                    <span class="tool-icon">🔺</span>
+                                    <span class="tool-name">杩槎</span>
+                                </button>
+                                <button class="tool-btn" data-tool="bamboo">
+                                    <span class="tool-icon">🎋</span>
+                                    <span class="tool-name">竹笼</span>
+                                </button>
+                                <button class="tool-btn" data-tool="dredge">
+                                    <span class="tool-icon">⛏️</span>
+                                    <span class="tool-name">淘淤</span>
+                                </button>
+                            </div>
+                            <div class="experience-info">
+                                <div class="control-group">
+                                    <label>当前工具</label>
+                                    <span class="info-value" id="current-tool">未选择</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>操作次数</label>
+                                    <span class="info-value" id="operation-count">0</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>截流效率</label>
+                                    <span class="info-value" id="interception-efficiency">0.0 %</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>稳定性评分</label>
+                                    <span class="info-value" id="stability-score">0</span>
+                                </div>
+                                <div class="control-group">
+                                    <label>完成度</label>
+                                    <span class="info-value" id="completion-rate">0%</span>
+                                </div>
+                            </div>
+                            <h4>成就列表</h4>
+                            <div class="achievements-list">
+                                <div class="achievement-item" id="ach-firstMacha">
+                                    <span class="ach-icon">🔺</span>
+                                    <span class="ach-name">首次放置杩槎</span>
+                                </div>
+                                <div class="achievement-item" id="ach-tenBamboo">
+                                    <span class="ach-icon">🎋</span>
+                                    <span class="ach-name">放置10个竹笼</span>
+                                </div>
+                                <div class="achievement-item" id="ach-interception50">
+                                    <span class="ach-icon">💧</span>
+                                    <span class="ach-name">截流超50%</span>
+                                </div>
+                                <div class="achievement-item" id="ach-interception80">
+                                    <span class="ach-icon">🌊</span>
+                                    <span class="ach-name">截流超80%</span>
+                                </div>
+                                <div class="achievement-item" id="ach-dredgeToWolong">
+                                    <span class="ach-icon">⛏️</span>
+                                    <span class="ach-name">淘淤至卧铁</span>
+                                </div>
+                                <div class="achievement-item" id="ach-completeRepair">
+                                    <span class="ach-icon">🏆</span>
+                                    <span class="ach-name">完成岁修</span>
+                                </div>
+                            </div>
+                            <h4>排行榜</h4>
+                            <div class="leaderboard" id="leaderboard">
+                                <table class="records-table">
+                                    <thead>
+                                        <tr>
+                                            <th>排名</th>
+                                            <th>昵称</th>
+                                            <th>分数</th>
+                                            <th>用时</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="leaderboard-body">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
         </main>
     </div>
 
@@ -391,5 +700,9 @@
     <script src="js/dujiangyan_3d.js"></script>
     <script src="js/riverbed_panel.js"></script>
     <script src="js/main.js"></script>
+    <script src="js/dynasty_compare.js"></script>
+    <script src="js/modern_compare.js"></script>
+    <script src="js/earthquake_sim.js"></script>
+    <script src="js/user_experience.js"></script>
 </body>
 </html>
